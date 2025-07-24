@@ -1,2 +1,2 @@
 # GenCast-Distilled
-Main repository for Miles Weberman' IRP at Imperial College London
+Working repo for Miles Weberman' IRP at Imperial College London
