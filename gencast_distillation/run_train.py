@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from gencast_distillation import model, config, training
+from gencast_distillation import model, config, training, utils
 from graphcast import data_utils
 
 def setup_gpu():
@@ -58,6 +58,14 @@ def main():
 
     # Inititialize teacher
     model.init_teacher()
+
+    iterator = utils.dummy_dataset_iterator(inputs, targets_template, forcings)
+
+    # Train
+    model = training.train_model(model, iterator, num_steps=1000)
+
+    # Save
+    training.save_model("student_ckpt.pkl", model)
 
 if __name__ == "__main__":
     main()
