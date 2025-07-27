@@ -1,0 +1,15 @@
+[project]
+name = "gencast-distilled"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "graphcast",
+]
+
+[tool.uv.sources]
+graphcast = { url = "https://github.com/deepmind/graphcast/archive/master.zip" }
+
+[project.optional-dependencies]
+tpu = ["jax[tpu] @ https://storage.googleapis.com/jax-releases/jax_releases.html"]
