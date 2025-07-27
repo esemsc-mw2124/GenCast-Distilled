@@ -103,15 +103,6 @@ class GenCastDistillationModel:
         return self.teacher_model(inputs, targets_template=targets_template, forcings=forcings)
 
 
-    def _configure_checkpoint_for_gpu(self, ckpt):
-        """
-        Configure checkpoint for GPU inference by setting appropriate attention type.
-        This follows the official GraphCast documentation for GPU compatibility.
-        """
-
-        def configure_sparse_transformer_config(config_obj, config_name=""):
-    return self.teacher_model(inputs, targets_template=targets_template, forcings=forcings)
-
 
     def _configure_checkpoint_for_gpu(self, ckpt):
         """
