@@ -10,6 +10,3 @@ dependencies = [
 
 [tool.uv.sources]
 graphcast = { url = "https://github.com/deepmind/graphcast/archive/master.zip" }
-
-[project.optional-dependencies]
-tpu = ["jax[tpu] @ https://storage.googleapis.com/jax-releases/jax_releases.html"]
