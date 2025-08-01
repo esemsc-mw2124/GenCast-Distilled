@@ -16,7 +16,7 @@ def training_step(model: GenCastDistillationModel, state: TrainState, batch, rng
 
     def loss_fn(params):
         # Run student forward
-        student_pred, new_state = model._student_transformed.apply(
+        student_pred, new_model_state = model._student_transformed.apply(
             params,
             state.model_state,
             rng,
@@ -35,25 +35,27 @@ def training_step(model: GenCastDistillationModel, state: TrainState, batch, rng
 
         # L2 loss between student and teacher predictions
         loss = denoiser_l2_loss(student_pred, teacher_pred)
-        return loss, new_state
+        return loss, new_model_state
 
     # Compute gradients
-    (loss, new_model_state), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.optimizer.target)
+    (loss, new_model_state), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
 
-    # Apply gradients
-    new_optimizer = state.optimizer.apply_gradient(grads)
+    # Compute parameter updates using Optax
+    updates, new_opt_state = model.optimizer.update(grads, state.opt_state, state.params)
+    new_params = optax.apply_updates(state.params, updates)
 
     # EMA update
     new_ema_params = jax.tree_map(
         lambda ema, new: 0.999 * ema + 0.001 * new,
         state.ema_params,
-        new_optimizer.target,
+        new_params,
     )
 
-    # Update state
+    # Update TrainState
     new_state = TrainState(
         step=state.step + 1,
-        optimizer=new_optimizer,
+        params=new_params,
+        opt_state=new_opt_state,
         ema_params=new_ema_params,
         model_state=new_model_state,
         num_sample_steps=state.num_sample_steps,
