@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from gencast_distillation.losses import denoiser_l2_loss
 from gencast_distillation.utils import dummy_dataset_iterator
+from gencast_distillation.model import GenCastDistillationModel, TrainState
 import numpy as np
 from tqdm import trange
 import pickle
