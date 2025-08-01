@@ -32,8 +32,9 @@ fs = gcsfs.GCSFileSystem()
 # Helper function to open NetCDF files with h5netcdf engine via file-like object
 def open_gcs_netcdf(file_path):
     with fs.open(file_path, mode='rb') as f:
-        ds = xr.open_dataset(f, engine='h5netcdf').load()
+        ds = xr.open_dataset(f, engine='netcdf4').load()
     return ds
+
 
 # Load normalization datasets
 normalization_data = {
