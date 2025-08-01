@@ -7,7 +7,6 @@ from gencast_distillation.patched_gencast import PatchedGenCast
 from gencast_distillation import utils
 from flax.struct import dataclass
 import optax
-from flax import optim
 from typing import Any
 
 class GenCastDistillationModel:
@@ -76,23 +75,31 @@ class GenCastDistillationModel:
         init_params = utils.copy_pytree(self.teacher_params)
         self.student_params = init_params
 
-        # Init state
+        # Initialize model state (e.g., batchnorm stats)
         self.student_state = self._student_transformed.init(
             jax.random.PRNGKey(rng),
             inputs,
             targets_template,
             forcings,
-        )[1]
+        )[1]  # [1] to get state, not params since we're manually setting params
 
-        optimizer_def = optim.Adam(learning_rate=1e-4)
-        student_optimizer = optimizer_def.create(init_params)
+        # Initialize Optax optimizer
+        optimizer = optax.adam(learning_rate=1e-4)
+        opt_state = optimizer.init(init_params)
 
+        # Update train state (new structure)
         self.train_state = TrainState(
             step=0,
-            optimizer=student_optimizer,
+            params=init_params,
+            opt_state=opt_state,
             ema_params=utils.copy_pytree(init_params),
             num_sample_steps=self.student_sampling_steps,
+            model_state=self.student_state,
         )
+
+        # Save the optimizer object itself if needed for update calls later
+        self.optimizer = optimizer
+
     
     def init_teacher(self):
         """Wraps and stores the teacher model using checkpoint params."""
@@ -142,7 +149,8 @@ class GenCastDistillationModel:
 @dataclass
 class TrainState:
     step: int
-    optimizer: flax.optim.Optimizer
+    params: Any  # model parameters
+    opt_state: optax.OptState  # optimizer state
     ema_params: Any
     num_sample_steps: int
     model_state: Any
