@@ -8,15 +8,26 @@ from gencast_distillation import utils
 from flax.struct import dataclass
 import optax
 from typing import Any
+import gcsfs
+import io
+import numpy as np
+import os
+from dataclasses import replace
+
+def _to_f32_xr(obj):
+    # Keep xarray objects as xarray; just change dtype
+    if isinstance(obj, (xarray.DataArray, xarray.Dataset)):
+        return obj.astype(np.float32)
+    # Fallback for numpy arrays / scalars
+    return np.asarray(obj, dtype=np.float32)
 
 class GenCastDistillationModel:
-    def __init__(self, ckpt_path, config, normalization_data):
+    def __init__(self, ckpt_data, config, normalization_data):
         # Ensure GPU backend is configured
         # jax.config.update('jax_platform_name', 'gpu')
 
         # Load the teacher from checkpoint
-        with open(ckpt_path, "rb") as f:
-            ckpt = checkpoint.load(f, gencast.CheckPoint)
+        ckpt = checkpoint.load(ckpt_data, gencast.CheckPoint)
 
         # Configure checkpoint for GPU compatibility
         # ckpt = self._configure_checkpoint_for_gpu(ckpt)
@@ -24,6 +35,20 @@ class GenCastDistillationModel:
         self.teacher_params = ckpt.params
         self.task_config = ckpt.task_config
         self.sampler_config = ckpt.sampler_config
+
+        teacher_steps = int(os.getenv("GENCAST_TEACHER_STEPS", "6"))
+        student_steps = int(os.getenv("GENCAST_STUDENT_STEPS", str(max(1, teacher_steps // 2))))
+
+        self.teacher_sampler_config = replace(
+            self.sampler_config,
+            num_noise_levels=min(self.sampler_config.num_noise_levels, teacher_steps),
+        )
+        self.student_sampler_config = replace(
+            self.teacher_sampler_config,
+            num_noise_levels=min(self.teacher_sampler_config.num_noise_levels, student_steps),
+)
+
+
         self.noise_config = ckpt.noise_config
         self.noise_encoder_config = ckpt.noise_encoder_config
         self.denoiser_architecture_config = ckpt.denoiser_architecture_config
@@ -32,62 +57,69 @@ class GenCastDistillationModel:
         self.config = config
         self.norm = normalization_data
 
+        self.teacher_sampling_steps = self.sampler_config.num_noise_levels
+        self.student_sampling_steps = getattr(
+            self.config,
+            "student_sampling_steps",
+            max(1, self.teacher_sampling_steps // 2)  # default: half of teacher
+        )
+
+
+        self.teacher_sampler_config = self.sampler_config
+        self.student_sampler_config = replace(
+            self.teacher_sampler_config,
+            num_noise_levels=self.student_sampling_steps
+        )
+
         self.init_teacher()
 
-
-    def _construct_wrapped_gencast(self, freeze=False):
-        """Wrap GenCast with normalization, NaN cleaning, etc."""
-        predictor = PatchedGenCast(
+    def _construct_wrapped_gencast(self, freeze=False, use_student=True, norm=None):
+        predictor = gencast.GenCast(
             task_config=self.task_config,
             denoiser_architecture_config=self.denoiser_architecture_config,
-            sampler_config=self.sampler_config,
+            sampler_config=self.student_sampler_config if use_student else self.teacher_sampler_config,
             noise_config=self.noise_config,
             noise_encoder_config=self.noise_encoder_config,
         )
 
+        # ensure float32 but keep xarray types intact
+        norm_f32 = {
+            "diffs_stddev_by_level": _to_f32_xr(norm["diffs_stddev_by_level"]),
+            "mean_by_level":         _to_f32_xr(norm["mean_by_level"]),
+            "stddev_by_level":       _to_f32_xr(norm["stddev_by_level"]),
+            "min_by_level":          _to_f32_xr(norm["min_by_level"]),
+        }
+
         predictor = normalization.InputsAndResiduals(
             predictor,
-            diffs_stddev_by_level=self.norm["diffs_stddev_by_level"],
-            mean_by_level=self.norm["mean_by_level"],
-            stddev_by_level=self.norm["stddev_by_level"],
+            diffs_stddev_by_level=norm_f32["diffs_stddev_by_level"],
+            mean_by_level=norm_f32["mean_by_level"],
+            stddev_by_level=norm_f32["stddev_by_level"],
         )
-
         predictor = nan_cleaning.NaNCleaner(
             predictor=predictor,
             reintroduce_nans=True,
-            fill_value=self.norm["min_by_level"],
-            var_to_clean='sea_surface_temperature',
+            fill_value=norm_f32["min_by_level"],   # stays xarray, now float32
+            var_to_clean="sea_surface_temperature",
         )
-        
         return predictor
 
     def init_student(self, rng, inputs, targets_template, forcings):
-        """Initializes student model using real training data."""
-
-        def student_forward_fn(i, t, f):
-            predictor = self._construct_wrapped_gencast(freeze=False)
+        def student_forward_fn(i, t, f, norm):
+            predictor = self._construct_wrapped_gencast(freeze=False, use_student=True, norm=norm)
             return predictor(i, targets_template=t, forcings=f)
-
-        # Transform the model
         self._student_transformed = hk.transform_with_state(student_forward_fn)
 
-        # Student starts with identical weights but fresh internal state
         init_params = utils.copy_pytree(self.teacher_params)
         self.student_params = init_params
 
-        # Initialize model state (e.g., batchnorm stats)
-        self.student_state = self._student_transformed.init(
-            jax.random.PRNGKey(rng),
-            inputs,
-            targets_template,
-            forcings,
-        )[1]  # [1] to get state, not params since we're manually setting params
+        _, self.student_state = self._student_transformed.init(
+            jax.random.PRNGKey(rng), inputs, targets_template, forcings, self.norm
+        )
 
-        # Initialize Optax optimizer
         optimizer = optax.adam(learning_rate=1e-4)
         opt_state = optimizer.init(init_params)
 
-        # Update train state (new structure)
         self.train_state = TrainState(
             step=0,
             params=init_params,
@@ -96,19 +128,39 @@ class GenCastDistillationModel:
             num_sample_steps=self.student_sampling_steps,
             model_state=self.student_state,
         )
-
-        # Save the optimizer object itself if needed for update calls later
         self.optimizer = optimizer
 
     
     def init_teacher(self):
         """Wraps and stores the teacher model using checkpoint params."""
-        self.teacher_model = self._construct_wrapped_gencast(freeze=True)
+
+        def teacher_forward_fn(inputs, targets_template, forcings):
+            model = gencast.GenCast(
+                sampler_config=self.teacher_sampler_config,
+                task_config=self.task_config,
+                denoiser_architecture_config=self.denoiser_architecture_config,
+                noise_config=self.noise_config,
+                noise_encoder_config=self.noise_encoder_config,
+            )
+            return model(inputs, targets_template=targets_template, forcings=forcings)
+
+        # Transform with Haiku
+        self.teacher_transformed = hk.transform_with_state(teacher_forward_fn)
+
+        # Save sampling steps info
         self.teacher_sampling_steps = self.sampler_config.num_noise_levels
 
-    def _apply_teacher(self, inputs, targets_template, forcings):
-        return self.teacher_model(inputs, targets_template=targets_template, forcings=forcings)
 
+    def _apply_teacher(self, inputs, targets_template, forcings, rng):
+        preds, _state = self.teacher_transformed.apply(
+            self.teacher_params,
+            self.teacher_state if hasattr(self, "teacher_state") else {},  # <<< use if present
+            rng,
+            inputs,
+            targets_template,
+            forcings,
+        )
+        return preds
 
 
     def _configure_checkpoint_for_gpu(self, ckpt):
