@@ -14,12 +14,12 @@ import numpy as np
 import os
 from dataclasses import replace
 
-def _to_f32_xr(obj):
+def _to_f16_xr(obj):
     # Keep xarray objects as xarray; just change dtype
     if isinstance(obj, (xarray.DataArray, xarray.Dataset)):
-        return obj.astype(np.float32)
+        return obj.astype(np.float16)
     # Fallback for numpy arrays / scalars
-    return np.asarray(obj, dtype=np.float32)
+    return np.asarray(obj, dtype=np.float16)
 
 class GenCastDistillationModel:
     def __init__(self, ckpt_data, config, normalization_data):
@@ -73,7 +73,7 @@ class GenCastDistillationModel:
 
         self.init_teacher()
 
-    def _construct_wrapped_gencast(self, freeze=False, use_student=True, norm=None):
+    def _construct_wrapped_gencast(self, freeze=False, use_student=True):
         predictor = gencast.GenCast(
             task_config=self.task_config,
             denoiser_architecture_config=self.denoiser_architecture_config,
@@ -82,31 +82,31 @@ class GenCastDistillationModel:
             noise_encoder_config=self.noise_encoder_config,
         )
 
-        # ensure float32 but keep xarray types intact
-        norm_f32 = {
-            "diffs_stddev_by_level": _to_f32_xr(norm["diffs_stddev_by_level"]),
-            "mean_by_level":         _to_f32_xr(norm["mean_by_level"]),
-            "stddev_by_level":       _to_f32_xr(norm["stddev_by_level"]),
-            "min_by_level":          _to_f32_xr(norm["min_by_level"]),
+        # ensure float16 but keep xarray types intact
+        norm_f16 = {
+            "diffs_stddev_by_level": _to_f16_xr(self.norm["diffs_stddev_by_level"]),
+            "mean_by_level":         _to_f16_xr(self.norm["mean_by_level"]),
+            "stddev_by_level":       _to_f16_xr(self.norm["stddev_by_level"]),
+            "min_by_level":          _to_f16_xr(self.norm["min_by_level"]),
         }
 
         predictor = normalization.InputsAndResiduals(
             predictor,
-            diffs_stddev_by_level=norm_f32["diffs_stddev_by_level"],
-            mean_by_level=norm_f32["mean_by_level"],
-            stddev_by_level=norm_f32["stddev_by_level"],
+            diffs_stddev_by_level=norm_f16["diffs_stddev_by_level"],
+            mean_by_level=norm_f16["mean_by_level"],
+            stddev_by_level=norm_f16["stddev_by_level"],
         )
         predictor = nan_cleaning.NaNCleaner(
             predictor=predictor,
             reintroduce_nans=True,
-            fill_value=norm_f32["min_by_level"],   # stays xarray, now float32
+            fill_value=norm_f16["min_by_level"],   # stays xarray, now float16
             var_to_clean="sea_surface_temperature",
         )
         return predictor
 
     def init_student(self, rng, inputs, targets_template, forcings):
-        def student_forward_fn(i, t, f, norm):
-            predictor = self._construct_wrapped_gencast(freeze=False, use_student=True, norm=norm)
+        def student_forward_fn(i, t, f):
+            predictor = self._construct_wrapped_gencast(freeze=False, use_student=True)
             return predictor(i, targets_template=t, forcings=f)
         self._student_transformed = hk.transform_with_state(student_forward_fn)
 
@@ -114,7 +114,7 @@ class GenCastDistillationModel:
         self.student_params = init_params
 
         _, self.student_state = self._student_transformed.init(
-            jax.random.PRNGKey(rng), inputs, targets_template, forcings, self.norm
+            jax.random.PRNGKey(rng), inputs, targets_template, forcings
         )
 
         optimizer = optax.adam(learning_rate=1e-4)

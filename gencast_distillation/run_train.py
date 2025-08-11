@@ -5,6 +5,8 @@ from graphcast import data_utils
 import xarray as xr
 import numpy as np
 
+from dataclasses import replace
+
 # def setup_gpu():
 #     """Setup and verify GPU configuration"""
 #     # Force GPU backend
@@ -25,8 +27,7 @@ import numpy as np
 #     print(f"JAX backend: {jax.default_backend()}")
 
 def to_f32(ds):
-    return ds.map(lambda v: v.astype(np.float32) if hasattr(v, "dtype") and
-                  np.issubdtype(v.dtype, np.floating) else v)
+    return ds.map(lambda v: v.astype(np.float32) if hasattr(v, "dtype") and np.issubdtype(v.dtype, np.floating) else v)
 
 
 def main():
@@ -44,13 +45,6 @@ def main():
     }
     example_batch = config.example_data
 
-
-    # print(f"example_batch.time.dtype: {example_batch.time.dtype}")
-    # print(f"example_batch.time.values[:10]: {example_batch.time.values[:10]}")
-    # print(f"example_batch.time.attrs: {example_batch.time.attrs}")
-    # print(f"example_batch.time.encoding: {getattr(example_batch.time, 'encoding', {})}")
-    # print(f"example_batch.dims: {example_batch.dims}")
-    # print(f"example_batch.sizes: {example_batch.sizes}")
 
     # Load model and data
     print("Loading distillation model...")
@@ -70,38 +64,19 @@ def main():
     targets_template = to_f32(targets_template)
     forcings = to_f32(forcings)
 
-    # # Initialize student
-    # print("Initializing student model...")
+    distillation_model.teacher_sampler_config = replace(
+    distillation_model.teacher_sampler_config,
+    num_noise_levels=2,  # 1 step (levels-1)
+)
 
-    # temp_config = distillation_model.task_config.__dict__.copy()
-    # temp_config['input_duration'] = '12h'  # or even '6h'
+    distillation_model.student_sampler_config = replace(
+        distillation_model.student_sampler_config,
+        num_noise_levels=1,  # 0 steps (levels-1) – minimal test
+    )
 
-    # print("Extracting inputs, targets, and forcings...")
-    # temp_config = distillation_model.task_config.__dict__.copy()
-    # temp_config['input_duration'] = '24h'  # Back to 24h
+    print("FINAL teacher levels:", distillation_model.teacher_sampler_config.num_noise_levels)
+    print("FINAL student levels:", distillation_model.student_sampler_config.num_noise_levels)
 
-    # inputs, targets, forcings = data_utils.extract_inputs_targets_forcings(
-    #     example_batch,
-    #     target_lead_times=slice("24h", "24h"),  # Change target to 24h instead of 12h
-    #     **temp_config,
-    # )
-
-    # # Add these debug prints:
-    # print(f"AFTER EXTRACTION:")
-    # print(f"Inputs time shape: {inputs.time.shape}")
-    # print(f"Inputs time values: {inputs.time.values}")
-    # print(f"Inputs variables: {list(inputs.data_vars.keys())}")
-    # print(f"Targets time shape: {targets.time.shape}")
-    # print(f"Forcings time shape: {forcings.time.shape}")
-
-    # # Check specific variables in inputs:
-    # for var_name in list(inputs.data_vars.keys())[:3]:  # Check first 3 variables
-    #     var = inputs[var_name]
-    #     print(f"Variable '{var_name}' shape: {var.shape}")
-    #     if 'time' in var.dims:
-    #         print(f"  - time dimension size: {var.sizes.get('time', 'N/A')}")
-
-    # targets_template = targets * jnp.nan
 
     # Initialize teacher
     print("Initializing teacher model...")
@@ -115,6 +90,10 @@ def main():
         targets_template=targets_template,
         forcings=forcings
     )
+
+    print("teacher num_noise_levels:", distillation_model.teacher_sampler_config.num_noise_levels)
+    print("student num_noise_levels:", distillation_model.student_sampler_config.num_noise_levels)
+
 
     # Create a dummy dataset iterator
     print("Creating dummy dataset iterator...")
