@@ -3,6 +3,6 @@ jax[tpu]
 git+https://github.com/google-deepmind/graphcast.git
 optax
 flax
-pip install "xarray[io]"
+xarray[io]
 gcsfs
 Tqdm

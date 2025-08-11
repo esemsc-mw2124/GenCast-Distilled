@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "gencast-distilled"
 version = "0.1.0"
@@ -5,11 +9,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "graphcast",
+    "graphcast @ https://github.com/deepmind/graphcast/archive/master.zip",
 ]
-
-[tool.uv.sources]
-graphcast = { url = "https://github.com/deepmind/graphcast/archive/master.zip" }
 
 [tool.setuptools.packages.find]
 where = ["."]
