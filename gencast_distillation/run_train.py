@@ -62,12 +62,12 @@ def main():
 
     distillation_model.teacher_sampler_config = replace(
     distillation_model.teacher_sampler_config,
-    num_noise_levels=2,  # 1 step (levels-1)
+    num_noise_levels=3,  # 1 step (levels-1)
 )
 
     distillation_model.student_sampler_config = replace(
         distillation_model.student_sampler_config,
-        num_noise_levels=1,  # 0 steps (levels-1) – minimal test
+        num_noise_levels=2,  # 0 steps (levels-1) – minimal test
     )
 
     print("FINAL teacher levels:", distillation_model.teacher_sampler_config.num_noise_levels)
