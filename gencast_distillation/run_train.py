@@ -22,6 +22,8 @@ def main():
     # import warnings
     # warnings.filterwarnings("error", message="overflow encountered in cast")
     # np.seterr(over='raise')
+
+    jax.distributed.initialize()
     
     # Load config, weights, norm stats
     ckpt_path = config.weights_path
