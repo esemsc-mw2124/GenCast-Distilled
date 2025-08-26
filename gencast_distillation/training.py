@@ -11,8 +11,8 @@ from gencast_distillation.model import TrainState
 
 def make_training_step(student_apply, teacher_apply_fn, optimizer):
     """
-    student_apply: (params, state, rng, inputs, targets_template, forcings) -> (pred, new_state)
-    teacher_apply_fn: Haiku-transformed .apply (params, state, rng, inputs, targets_template, forcings) -> (pred, new_state)
+    student_apply: (params, state, rng, inputs, targets, forcings) -> (pred, new_state)
+    teacher_apply_fn: Haiku-transformed .apply (params, state, rng, inputs, targets, forcings) -> (pred, new_state)
     """
     
     @partial(jax.jit, donate_argnums=(0,))
@@ -26,7 +26,7 @@ def make_training_step(student_apply, teacher_apply_fn, optimizer):
                 model_state,
                 rng_s,
                 batch["inputs"],
-                batch["targets_template"],
+                batch["targets"],
                 batch["forcings"],
             )
 
@@ -36,7 +36,7 @@ def make_training_step(student_apply, teacher_apply_fn, optimizer):
                 teacher_state,
                 rng_t,
                 batch["inputs"],
-                batch["targets_template"],
+                batch["targets"],
                 batch["forcings"],
             )
 

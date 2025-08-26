@@ -1,28 +1,9 @@
-# import os
-# import xarray as xr
-
-# base_dir = os.path.dirname(__file__)  # gets the dir of config.py
-# norm_dir = os.path.join(base_dir, "normalization_data")
-# data_dir = os.path.join(base_dir, "data")
-# model_weights_dir = os.path.join(base_dir, "gencast_weights")
-
-# normalization_data = {
-#     "diffs_stddev_by_level": xr.open_dataset(os.path.join(norm_dir, "gencast_stats_diffs_stddev_by_level.nc")).load(),
-#     "mean_by_level": xr.open_dataset(os.path.join(norm_dir, "gencast_stats_mean_by_level.nc")).load(),
-#     "stddev_by_level": xr.open_dataset(os.path.join(norm_dir, "gencast_stats_stddev_by_level.nc")).load(),
-#     "min_by_level": xr.open_dataset(os.path.join(norm_dir, "gencast_stats_min_by_level.nc")).load(),
-# }
-
-# example_data = xr.load_dataset(os.path.join(data_dir, "era5_date-2019-03-29_res-1.0_levels-13_steps-01.nc"), decode_timedelta=False).load()
-
-# model_weights_path = os.path.join(model_weights_dir, "gencast_params_GenCast 1p0deg Mini _2019.npz")
-
-
 import xarray as xr
 import numpy as np
 import pandas as pd
 import gcsfs
 import io
+from gencast_distillation.get_data import fetch_data, process_data
 
 # Your GCS bucket base path
 bucket_base = "gs://gencast-distillation-bucket"
@@ -65,10 +46,14 @@ normalization_data = {
 }
 
 # Load example input
-example_data = open_gcs_netcdf(f"{bucket_base}/data/era5_date-2019-03-29_res-1.0_levels-13_steps-04.nc")
+example_data = open_gcs_netcdf(f"{bucket_base}/data/era5_date-2019-03-29_res-1.0_levels-13_steps-30.nc")
 
 if not isinstance(example_data["time"], xr.DataArray):
     example_data["time"] = xr.DataArray(example_data["time"])
+
+training_data = fetch_data()
+training_data = process_data(training_data)
+# training_data = to_timedelta_hours_if_needed(training_data)
 
 # Load .npz weights (manually using gcsfs)
 weights_path = f"{bucket_base}/gencast_weights/gencast_params_GenCast 1p0deg Mini _2019.npz"
