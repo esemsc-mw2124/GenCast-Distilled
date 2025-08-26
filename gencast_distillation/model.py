@@ -65,11 +65,11 @@ class GenCastDistillationModel:
         )
 
 
-        self.teacher_sampler_config = self.sampler_config
-        self.student_sampler_config = replace(
-            self.teacher_sampler_config,
-            num_noise_levels=self.student_sampling_steps
-        )
+        # self.teacher_sampler_config = self.sampler_config
+        # self.student_sampler_config = replace(
+        #     self.teacher_sampler_config,
+        #     num_noise_levels=self.student_sampling_steps
+        # )
 
         self.init_teacher()
 
@@ -83,23 +83,23 @@ class GenCastDistillationModel:
         )
 
         # ensure float16 but keep xarray types intact
-        norm_f16 = {
-            "diffs_stddev_by_level": _to_f16_xr(self.norm["diffs_stddev_by_level"]),
-            "mean_by_level":         _to_f16_xr(self.norm["mean_by_level"]),
-            "stddev_by_level":       _to_f16_xr(self.norm["stddev_by_level"]),
-            "min_by_level":          _to_f16_xr(self.norm["min_by_level"]),
-        }
+        # norm_f16 = {
+        #     "diffs_stddev_by_level": _to_f16_xr(self.norm["diffs_stddev_by_level"]),
+        #     "mean_by_level":         _to_f16_xr(self.norm["mean_by_level"]),
+        #     "stddev_by_level":       _to_f16_xr(self.norm["stddev_by_level"]),
+        #     "min_by_level":          _to_f16_xr(self.norm["min_by_level"]),
+        # }
 
         predictor = normalization.InputsAndResiduals(
             predictor,
-            diffs_stddev_by_level=norm_f16["diffs_stddev_by_level"],
-            mean_by_level=norm_f16["mean_by_level"],
-            stddev_by_level=norm_f16["stddev_by_level"],
+            diffs_stddev_by_level=self.norm["diffs_stddev_by_level"],
+            mean_by_level=self.norm["mean_by_level"],
+            stddev_by_level=self.norm["stddev_by_level"],
         )
         predictor = nan_cleaning.NaNCleaner(
             predictor=predictor,
             reintroduce_nans=True,
-            fill_value=norm_f16["min_by_level"],   # stays xarray, now float16
+            fill_value=self.norm["min_by_level"],   # stays xarray, now float16
             var_to_clean="sea_surface_temperature",
         )
         return predictor
@@ -124,8 +124,8 @@ class GenCastDistillationModel:
             step=0,
             params=init_params,
             opt_state=opt_state,
-            ema_params=utils.copy_pytree(init_params),
-            num_sample_steps=self.student_sampling_steps,
+            ema_params=init_params,
+            num_sample_steps=self.student_sampler_config.num_noise_levels,
             model_state=self.student_state,
         )
         self.optimizer = optimizer
@@ -133,22 +133,14 @@ class GenCastDistillationModel:
     
     def init_teacher(self):
         """Wraps and stores the teacher model using checkpoint params."""
-
         def teacher_forward_fn(inputs, targets_template, forcings):
-            model = gencast.GenCast(
-                sampler_config=self.teacher_sampler_config,
-                task_config=self.task_config,
-                denoiser_architecture_config=self.denoiser_architecture_config,
-                noise_config=self.noise_config,
-                noise_encoder_config=self.noise_encoder_config,
+            predictor = self._construct_wrapped_gencast(
+                freeze=True, use_student=False
             )
-            return model(inputs, targets_template=targets_template, forcings=forcings)
+            return predictor(inputs, targets_template=targets_template, forcings=forcings)
 
-        # Transform with Haiku
         self.teacher_transformed = hk.transform_with_state(teacher_forward_fn)
-
-        # Save sampling steps info
-        self.teacher_sampling_steps = self.sampler_config.num_noise_levels
+        self.teacher_sampling_steps = self.teacher_sampler_config.num_noise_levels
 
 
     def _apply_teacher(self, inputs, targets_template, forcings, rng):
