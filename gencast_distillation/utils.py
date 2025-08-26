@@ -2,6 +2,32 @@ import jax
 import jax.tree_util
 import jax.numpy as jnp
 import xarray as xr
+from graphcast import xarray_jax
+import numpy as np
+
+def to_jax(ds: xr.Dataset) -> xr.Dataset:
+    """Convert DATA VARS to JAX-backed arrays; leave coords/indexes alone."""
+    data_vars = {}
+    for name, da in ds.data_vars.items():
+        # Make sure we have an in-memory array (compute if it's Dask)
+        arr = da.data
+        if hasattr(arr, "compute"):        # Dask arrays have .compute()
+            arr = arr.compute()
+        # Convert to JAX, then wrap
+        jax_arr = jnp.asarray(np.asarray(arr))
+        wrapped = xarray_jax.JaxArrayWrapper(jax_arr)
+
+        # Rebuild as a DataArray with dims & coords so xarray is happy
+        data_vars[name] = xr.DataArray(
+            wrapped,
+            dims=da.dims,          # <-- crucial: keep the original dims
+            coords=da.coords,      # keep coords (don’t convert to JAX)
+            attrs=da.attrs,
+            name=name,
+        )
+
+    # Keep original coords/attrs at the dataset level
+    return xr.Dataset(data_vars=data_vars, coords=ds.coords, attrs=ds.attrs)
 
 def copy_pytree(pytree):
     """Performs a deep copy of a JAX pytree."""
@@ -83,6 +109,10 @@ def iterator(
             target_lead_times=target_lead_times,
             **getattr(distillation_model, "task_config", {}).__dict__,
         )
+
+        inputs = to_jax(inputs)
+        targets = to_jax(targets)
+        forcings = to_jax(forcings)
 
         yield {
             "inputs": inputs,

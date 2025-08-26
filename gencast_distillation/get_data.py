@@ -10,6 +10,7 @@ TEMPLATE_VAR_ORDER = [
     "temperature", "geopotential",
     "u_component_of_wind", "v_component_of_wind",
     "vertical_velocity", "specific_humidity",
+    "sea_surface_temperature", "total_precipitation_12hr"
 ]
 
 EXPECTED_COORDS = {"lon", "lat", "level", "datetime", "time"}

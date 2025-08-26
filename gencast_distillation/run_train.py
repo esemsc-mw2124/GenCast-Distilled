@@ -31,8 +31,7 @@ def main():
         for k, v in config.normalization_data.items()
     }
     # example_batch = config.example_data
-
-
+  
     # Load model and data
     print("Loading distillation model...")
     distillation_model = model.GenCastDistillationModel(config.model_weights, _config, norm_data)
@@ -100,3 +99,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
