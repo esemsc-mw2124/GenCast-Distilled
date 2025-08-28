@@ -93,7 +93,7 @@ def main():
 
     # Train
     print("Starting training...")
-    trained_model = training.train_model(distillation_model, iterator, num_steps=5, log_every=1)
+    trained_model = training.train_model(distillation_model, iterator, num_steps=100, log_every=1)
 
     # Save
     print("Saving trained model...")

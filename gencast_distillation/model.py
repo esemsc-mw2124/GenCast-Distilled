@@ -117,11 +117,12 @@ class GenCastDistillationModel:
             jax.random.PRNGKey(rng), inputs, targets_template, forcings
         )
 
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(1_000.0),
-            utils.sanitize_nan_inf(),
-            optax.adam(learning_rate=1e-4),
-        )
+        # optimizer = optax.chain(
+        #     optax.clip_by_global_norm(1_000.0),
+        #     utils.sanitize_nan_inf(),
+        #     optax.adam(learning_rate=1e-4),
+        # )
+        optimizer = optax.adam(learning_rate=1e-4)
         opt_state = optimizer.init(init_params)
 
         self.train_state = TrainState(

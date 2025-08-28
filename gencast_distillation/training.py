@@ -4,10 +4,21 @@ import optax
 from functools import partial
 from tqdm import trange
 import pickle
+from jax import tree_util as jtu
 
 from gencast_distillation.losses import denoiser_l2_loss
 from gencast_distillation.model import TrainState
 
+def _clean_grad(x):
+    # Only touch inexact types (float/complex)
+    if hasattr(x, "dtype") and jnp.issubdtype(x.dtype, jnp.inexact):
+        return jnp.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    return x
+
+def _global_norm_safe(tree):
+    # Global norm that returns finite even if raw grads contain NaN/Inf
+    g = jtu.tree_map(_clean_grad, tree)
+    return optax.global_norm(g)
 
 def make_training_step(student_apply, teacher_apply_fn, optimizer):
     """
@@ -19,40 +30,34 @@ def make_training_step(student_apply, teacher_apply_fn, optimizer):
     def step(state: TrainState, batch, rng, teacher_params, teacher_state):
         def loss_fn(params, model_state):
             rng_s, rng_t = jax.random.split(rng)
-
-            # Student forward
             student_pred, new_model_state = student_apply(
-                params,
-                model_state,
-                rng_s,
-                batch["inputs"],
-                batch["targets"],
-                batch["forcings"],
+                params, model_state, rng_s, batch["inputs"], batch["targets"], batch["forcings"]
             )
-
-            # Teacher forward (NO closures; pass weights/state explicitly)
             teacher_pred, _ = teacher_apply_fn(
-                teacher_params,
-                teacher_state,
-                rng_t,
-                batch["inputs"],
-                batch["targets"],
-                batch["forcings"],
+                teacher_params, teacher_state, rng_t, batch["inputs"], batch["targets"], batch["forcings"]
             )
-
             loss = denoiser_l2_loss(student_pred, teacher_pred)
             return loss, new_model_state
 
-        (loss, new_model_state), grads = jax.value_and_grad(
-            loss_fn, has_aux=True
-        )(state.params, state.model_state)
+        (loss, new_model_state), grads_raw = jax.value_and_grad(loss_fn, has_aux=True)(
+            state.params, state.model_state
+        )
 
-        # TODO" remove only for debugging
-        grads_finite = jnp.all(jnp.isfinite(optax.global_norm(grads)))
-        loss_finite = jnp.isfinite(loss)
-        jax.debug.print("Step {x}: Loss={l}, GradNorm={gn}, FiniteLoss={lf}, FiniteGrad={gf}",
-                        x=state.step, l=loss, gn=optax.global_norm(grads), lf=loss_finite, gf=grads_finite)
+        # Clean grads BEFORE logging or updating
+        grads = jtu.tree_map(_clean_grad, grads_raw)
 
+        # (Optional) manual clip by global norm for determinism in logs
+        gn_clean = optax.global_norm(grads)
+        clip = 10.0
+        scale = jnp.minimum(1.0, clip / (gn_clean + 1e-12))
+        grads = jtu.tree_map(lambda g: g * scale, grads)
+
+        # Debug: show raw vs clean grad norms
+        gn_raw = optax.global_norm(grads_raw)            # may be NaN
+        jax.debug.print(
+            "Step {x}: Loss={l}, GradNorm(raw)={gnr}, GradNorm(clean)={gnc}",
+            x=state.step, l=loss, gnr=gn_raw, gnc=gn_clean
+        )
 
         updates, new_opt_state = optimizer.update(grads, state.opt_state, state.params)
         new_params = optax.apply_updates(state.params, updates)
