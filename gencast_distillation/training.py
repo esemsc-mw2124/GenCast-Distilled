@@ -47,6 +47,13 @@ def make_training_step(student_apply, teacher_apply_fn, optimizer):
             loss_fn, has_aux=True
         )(state.params, state.model_state)
 
+        # TODO" remove only for debugging
+        grads_finite = jnp.all(jnp.isfinite(optax.global_norm(grads)))
+        loss_finite = jnp.isfinite(loss)
+        jax.debug.print("Step {x}: Loss={l}, GradNorm={gn}, FiniteLoss={lf}, FiniteGrad={gf}",
+                        x=state.step, l=loss, gn=optax.global_norm(grads), lf=loss_finite, gf=grads_finite)
+
+
         updates, new_opt_state = optimizer.update(grads, state.opt_state, state.params)
         new_params = optax.apply_updates(state.params, updates)
         new_ema = optax.incremental_update(new_params, state.ema_params, step_size=0.001)

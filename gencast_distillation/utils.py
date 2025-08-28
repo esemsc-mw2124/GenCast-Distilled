@@ -4,6 +4,8 @@ import jax.numpy as jnp
 import xarray as xr
 from graphcast import xarray_jax
 import numpy as np
+import optax
+from jax import tree_util as jtu
 
 def to_jax(ds: xr.Dataset) -> xr.Dataset:
     """Convert DATA VARS to JAX-backed arrays; leave coords/indexes alone."""
@@ -119,3 +121,18 @@ def iterator(
             "targets": targets,
             "forcings": forcings,
         }
+
+def sanitize_nan_inf() -> optax.GradientTransformation:
+    """Replace NaN / ±Inf in gradient updates with 0 (no-op for that entry)."""
+    def init_fn(_params):
+        return ()
+    def _safe_nan_to_num(x):
+        dtype = getattr(x, "dtype", None)
+        # Only touch inexact (float/complex) arrays; leave others (ints, None, objects) alone
+        if dtype is not None and jnp.issubdtype(dtype, jnp.inexact):
+            return jnp.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        return x
+    def update_fn(updates, state, params=None):
+        clean = jtu.tree_map(_safe_nan_to_num, updates)
+        return clean, state
+    return optax.GradientTransformation(init_fn, update_fn)

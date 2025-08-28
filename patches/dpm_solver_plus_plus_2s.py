@@ -131,7 +131,7 @@ class Sampler(base.Sampler):
       # cost the memory savings can be significant.
       # TODO(dominicmasters): Figure out if we can merge the two noise sampler
       # calls into one to avoid this hack.
-      maybe_init_noise = jnp.asarray(i == 0, dtype=noise_levels.dtype)
+      maybe_init_noise = jnp.asarray(i == 0, dtype=noise_levels[0].dtype)
       x = x + init_noise(x) * maybe_init_noise
 
       noise_level = noise_levels[i]

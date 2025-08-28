@@ -23,7 +23,7 @@ def main():
     # warnings.filterwarnings("error", message="overflow encountered in cast")
     # np.seterr(over='raise')
 
-    jax.distributed.initialize()
+    # jax.distributed.initialize()
     
     # Load config, weights, norm stats
     ckpt_path = config.weights_path
@@ -62,12 +62,12 @@ def main():
 
     distillation_model.teacher_sampler_config = replace(
     distillation_model.teacher_sampler_config,
-    num_noise_levels=3,  # 1 step (levels-1)
+    num_noise_levels=2,  # 1 step (levels-1)
 )
 
     distillation_model.student_sampler_config = replace(
         distillation_model.student_sampler_config,
-        num_noise_levels=2,  # 0 steps (levels-1) – minimal test
+        num_noise_levels=1,  # 0 steps (levels-1) – minimal test
     )
 
     print("FINAL teacher levels:", distillation_model.teacher_sampler_config.num_noise_levels)
@@ -93,7 +93,7 @@ def main():
 
     # Train
     print("Starting training...")
-    trained_model = training.train_model(distillation_model, iterator, num_steps=10, log_every=1)
+    trained_model = training.train_model(distillation_model, iterator, num_steps=5, log_every=1)
 
     # Save
     print("Saving trained model...")
