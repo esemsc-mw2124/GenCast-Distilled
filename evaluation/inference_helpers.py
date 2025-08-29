@@ -1,7 +1,7 @@
 import jax
 import haiku as hk
 from graphcast import gencast, normalization, nan_cleaning
-from graphcast import xarray_tree, xarray_jax 
+from graphcast import xarray_tree, xarray_jax
 
 def construct_wrapped_gencast(
     sampler_config,
@@ -76,21 +76,19 @@ def build_transforms(
     return hk.transform_with_state(run_forward_fn), hk.transform_with_state(loss_fn)
 
 
-def init_and_compile(
-    rng_key,
+def build_run_forward_pmap(
+    params,
+    state,
     sampler_config,
     task_config,
     denoiser_architecture_config,
     noise_config,
     noise_encoder_config,
     norm_data,
-    train_inputs,
-    train_targets,
-    train_forcings,
 ):
-    """Initializes params and builds compiled forward/pmap functions."""
+    """Builds a pmapped forward function using provided params and configs."""
     # Build transforms
-    run_forward, loss_fn = build_transforms(
+    run_forward, _ = build_transforms(
         sampler_config,
         task_config,
         denoiser_architecture_config,
@@ -99,19 +97,10 @@ def init_and_compile(
         norm_data,
     )
 
-    # Initialize params & state
-    init_jitted = jax.jit(loss_fn.init)
-    params, state = init_jitted(
-        rng=rng_key,
-        inputs=train_inputs,
-        targets=train_targets,
-        forcings=train_forcings,
-    )
-
-    # Compile forward functions
+    # Compile forward pass
     run_forward_jitted = jax.jit(
         lambda rng, i, t, f: run_forward.apply(params, state, rng, i, t, f)[0]
     )
-    run_forward_pmap = xarray_jax.pmap(run_forward_jitted, dim="sample")
 
-    return params, state, run_forward_jitted, run_forward_pmap
+    # Parallelize across devices
+    return xarray_jax.pmap(run_forward_jitted, dim="sample")

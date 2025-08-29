@@ -78,13 +78,12 @@ def latitude_weighted_mean(data: xr.DataArray, lat_name="lat"):
 
 def evaluate(predictions: xr.Dataset, eval_targets: xr.Dataset, variable="2m_temperature", level=None):
     """
-    Full GenCast-style evaluation pipeline:
+    GenCast-style evaluation pipeline with numerical comparison output:
     - Per-grid CRPS
-    - Global CRPS (lat-weighted + unweighted)
-    - Spread-skill calibration
-    - Global CRPS vs lead time
-    - CRPS histograms
-    - Multi-scale spatially pooled CRPS vs lead time (GenCast Fig. 6 style)
+    - Global CRPS (unweighted only)
+    - Spread-skill ratio
+    - Global CRPS vs lead time (only unweighted)
+    - Pooled CRPS (select one resolution)
     """
     print("Selecting variable:", variable)
     preds = select(predictions, variable, level)
@@ -94,22 +93,22 @@ def evaluate(predictions: xr.Dataset, eval_targets: xr.Dataset, variable="2m_tem
     print("Computing CRPS per grid cell...")
     crps_field = compute_crps(preds, truth)
 
-    # ---- Global CRPS Scores ----
-    print("Computing global CRPS (unweighted and lat-weighted)...")
+    # ---- Global CRPS (Unweighted Only) ----
+    print("Computing global CRPS (unweighted)...")
     global_crps_unweighted = crps_field.mean(dim=("lat", "lon"))
-    global_crps_weighted = latitude_weighted_mean(crps_field, lat_name="lat").mean(dim="lon")
-
-    print(f"Global CRPS (unweighted): {float(global_crps_unweighted.mean().values):.5f}")
-    print(f"Global CRPS (lat-weighted): {float(global_crps_weighted.mean().values):.5f}")
+    crps_score = float(global_crps_unweighted.mean().values)
+    print(f"Global CRPS (unweighted): {crps_score:.5f}")
 
     # ---- Spread / Skill Diagnostic ----
     print("Computing spread/skill ratio for calibration check...")
     ensemble_mean = preds.mean(dim="sample")
     rmse = np.sqrt(((ensemble_mean - truth) ** 2).mean(dim=("lat", "lon")))
     spread = preds.std(dim="sample").mean(dim=("lat", "lon"))
-    spread_skill_ratio = spread / rmse
+    spread_skill_ratio = float((spread / rmse).mean().values)
+    rmse_score = float(rmse.mean().values)
+    spread_score = float(spread.mean().values)
 
-    # ---- Visualization: CRPS Map ----
+    # ---- Visualization: CRPS Evolution Map ----
     print("Visualizing CRPS evolution over time...")
     crps_scaled = scale(crps_field, robust=True, center=None)
     plot_data({"CRPS per grid": crps_scaled}, f"CRPS Evolution - {variable}")
@@ -117,11 +116,6 @@ def evaluate(predictions: xr.Dataset, eval_targets: xr.Dataset, variable="2m_tem
     # ---- Visualization: Global CRPS vs Lead Time ----
     print("Plotting global CRPS vs lead time...")
     plt.figure(figsize=(8, 5))
-    plt.plot(
-        global_crps_weighted.time / np.timedelta64(1, 'h') / 24,
-        global_crps_weighted,
-        label="Lat-weighted"
-    )
     plt.plot(
         global_crps_unweighted.time / np.timedelta64(1, 'h') / 24,
         global_crps_unweighted,
@@ -135,7 +129,7 @@ def evaluate(predictions: xr.Dataset, eval_targets: xr.Dataset, variable="2m_tem
     plt.grid()
     plt.show()
 
-    # ---- Visualization: Spread vs RMSE ----
+    # ---- Spread vs RMSE Plot ----
     print("Plotting calibration check: spread vs RMSE...")
     plt.figure(figsize=(8, 5))
     plt.plot(rmse.time / np.timedelta64(1, 'h') / 24, rmse, label="RMSE (Ensemble Mean)", linewidth=2)
@@ -147,23 +141,26 @@ def evaluate(predictions: xr.Dataset, eval_targets: xr.Dataset, variable="2m_tem
     plt.grid()
     plt.show()
 
-    # ---- Multi-Scale Pooled CRPS ----
-    print("Computing spatially pooled CRPS at multiple radii...")
-    radii_km = [120, 241, 481, 962, 1922, 3828]
-    pooled_results = compute_pooled_crps(preds, truth, radii_km=radii_km)
+    # ---- Pooled CRPS at One Radius ----
+    selected_radius = 962  # You can change this if desired
+    print(f"Computing spatially pooled CRPS at {selected_radius} km radius...")
+    pooled_preds = spatial_pooling(preds.mean(dim="sample"), radius_km=selected_radius)
+    pooled_truth = spatial_pooling(truth, radius_km=selected_radius)
+    pooled_crps = compute_crps(pooled_preds.expand_dims("sample"), pooled_truth)
+    pooled_crps_timeseries = pooled_crps.mean(dim=("lat", "lon"))
+    pooled_crps_score = float(pooled_crps_timeseries.mean().values)
 
-    # ---- Visualization: Pooled CRPS vs Lead Time ----
-    print("Plotting pooled CRPS vs lead time...")
-    plt.figure(figsize=(10, 6))
-    for r in radii_km:
-        plt.plot(
-            pooled_results[r].time / np.timedelta64(1, 'h') / 24,
-            pooled_results[r],
-            label=f"{r} km pooling"
-        )
+    # ---- Pooled CRPS Plot ----
+    print(f"Plotting pooled CRPS vs lead time ({selected_radius} km)...")
+    plt.figure(figsize=(8, 5))
+    plt.plot(
+        pooled_crps_timeseries.time / np.timedelta64(1, 'h') / 24,
+        pooled_crps_timeseries,
+        label=f"{selected_radius} km pooling"
+    )
     plt.xlabel("Lead time (days)")
     plt.ylabel("Pooled CRPS")
-    plt.title(f"Multi-Scale Pooled CRPS vs Lead Time ({variable})")
+    plt.title(f"Pooled CRPS vs Lead Time ({variable})")
     plt.legend()
     plt.grid()
     plt.show()
@@ -179,5 +176,14 @@ def evaluate(predictions: xr.Dataset, eval_targets: xr.Dataset, variable="2m_tem
     plt.grid()
     plt.show()
 
-    print("GenCast-style evaluation complete.")
-    return
+    print("Evaluation complete.")
+    print("====================")
+
+    return {
+        "global_crps": crps_score,
+        "rmse": rmse_score,
+        "spread": spread_score,
+        "spread_skill_ratio": spread_skill_ratio,
+        "pooled_crps_962km": pooled_crps_score
+    }
+
