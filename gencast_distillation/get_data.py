@@ -24,6 +24,7 @@ def fetch_data(url = "gs://weatherbench2/datasets/era5/1959-2023_01_10-wb13-6h-1
     )
     return ds
 
+# Bilinear downsampling, this doesn't work on TPU VM
 # def regrid_data(ds, weights_file="era5_to_1deg_bilinear.nc", reuse_weights=True):
 #     # --- Accept either latitude/longitude or lat/lon ---
 #     rename = {}

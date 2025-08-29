@@ -45,7 +45,7 @@ normalization_data = {
     "min_by_level": open_gcs_netcdf(f"{bucket_base}/normalization_data/gencast_stats_min_by_level.nc"),
 }
 
-# Load example input
+# Load evaluation input
 example_data = open_gcs_netcdf(f"{bucket_base}/data/era5_date-2019-03-29_res-1.0_levels-13_steps-30.nc")
 
 if not isinstance(example_data["time"], xr.DataArray):
@@ -55,10 +55,7 @@ training_data = fetch_data()
 training_data = process_data(training_data)
 # training_data = to_timedelta_hours_if_needed(training_data)
 
-# Load .npz weights (manually using gcsfs)
+# Load model weights
 weights_path = f"{bucket_base}/gencast_weights/gencast_params_GenCast 1p0deg Mini _2019.npz"
 with fs.open(weights_path, 'rb') as f:
     model_weights = io.BytesIO(f.read())
-
-
-# model_weights is a NpzFile object (use model_weights['key'] to access arrays)

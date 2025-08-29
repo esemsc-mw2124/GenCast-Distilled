@@ -61,13 +61,11 @@ def make_training_step(student_apply, teacher_apply_fn, optimizer):
 
         updates, new_opt_state = optimizer.update(grads, state.opt_state, state.params)
         new_params = optax.apply_updates(state.params, updates)
-        new_ema = optax.incremental_update(new_params, state.ema_params, step_size=0.001)
 
         new_state = TrainState(
             step=state.step + 1,
             params=new_params,
             opt_state=new_opt_state,
-            ema_params=new_ema,
             model_state=new_model_state,
             num_sample_steps=state.num_sample_steps,
         )
@@ -111,7 +109,6 @@ def save_model(path, model):
         pickle.dump(
             {
                 "params": model.train_state.params,
-                "ema_params": model.train_state.ema_params,
                 "state": model.train_state.model_state,
             },
             f,
